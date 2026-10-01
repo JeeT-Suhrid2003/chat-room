@@ -13,7 +13,6 @@ spec:
 			targetPort: http
 ---
 apiVersion: v1
-kind: Service
 metadata:
 	name: backend
 spec:
@@ -27,7 +26,6 @@ spec:
 			targetPort: http
 ---
 apiVersion: v1
-kind: Service
 metadata:
 	name: database
 spec:
