@@ -1,0 +1,15 @@
+{
+  "name": "small-room",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small realtime chat room with PostgreSQL persistence",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "socket.io": "^4.8.1"
+  }
+}

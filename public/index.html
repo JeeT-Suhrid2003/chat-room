@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f3f5ef">
+    <meta name="description" content="A small, friendly realtime chat room.">
+    <title>Small Room</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/socket.io/socket.io.js" defer></script>
+    <script src="/client.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Small Room home">
+          <span class="brand-mark" aria-hidden="true">s.</span>
+          <span>small room<span class="brand-period">.</span></span>
+        </a>
+        <div class="topbar-note"><span class="live-dot"></span> A little corner of the internet</div>
+        <button class="identity-button" id="change-name" type="button" title="Change display name">
+          <span class="avatar avatar-small" id="profile-avatar">G</span>
+          <span id="profile-name">Guest</span>
+          <span class="edit-mark" aria-hidden="true">↗</span>
+        </button>
+      </header>
+
+      <section class="room-layout" aria-label="Chat room">
+        <aside class="room-aside">
+          <div class="room-label">YOUR SPACE <span>01</span></div>
+          <div class="room-link room-link-active">
+            <span class="hash-mark">#</span>
+            <span class="room-link-copy"><strong>the-lounge</strong><small>Everyone is welcome</small></span>
+            <span class="room-link-dot" aria-hidden="true"></span>
+          </div>
+          <div class="aside-rule"></div>
+          <div class="aside-note">
+            <span class="note-icon" aria-hidden="true">✳</span>
+            <p>Good conversations start with a hello.</p>
+          </div>
+          <div class="aside-footer"><span>MADE FOR THE MOMENT</span><span>v1.0</span></div>
+        </aside>
+
+        <section class="conversation" aria-label="The lounge conversation">
+          <header class="room-header">
+            <div class="room-title-wrap">
+              <span class="room-title-hash">#</span>
+              <div><h1>the-lounge</h1><p>A shared room for passing thoughts.</p></div>
+            </div>
+            <div class="online-count" aria-live="polite">
+              <span class="online-dot"></span><strong id="online-count">1</strong><span>here now</span>
+            </div>
+          </header>
+
+          <div class="message-list" id="messages" role="log" aria-live="polite" aria-relevant="additions">
+            <div class="welcome-note" id="welcome-note">
+              <div class="welcome-symbol" aria-hidden="true">↘</div>
+              <div class="welcome-date">A FRESH LITTLE START</div>
+              <h2>The room is open.</h2>
+              <p>Say hello, share a thought, or just settle in.</p>
+            </div>
+          </div>
+
+          <div class="typing-line" id="typing-line" aria-live="polite"></div>
+          <form class="composer" id="message-form">
+            <label class="sr-only" for="message-input">Write a message</label>
+            <input id="message-input" name="message" maxlength="500" autocomplete="off" placeholder="Send a message to the room...">
+            <div class="composer-footer">
+              <span class="composer-hint"><kbd>enter</kbd> to send <span class="hint-divider">·</span> be kind</span>
+              <span class="char-count" id="char-count">0 / 500</span>
+              <button class="send-button" type="submit" aria-label="Send message"><span>Send</span><span aria-hidden="true">↗</span></button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <dialog class="name-dialog" id="name-dialog" aria-labelledby="dialog-title">
+        <form id="name-form">
+          <div class="dialog-kicker">A QUICK INTRODUCTION</div>
+          <h2 id="dialog-title">What should we call you?</h2>
+          <label for="name-input">Display name</label>
+          <input id="name-input" maxlength="24" autocomplete="nickname" placeholder="Your name" required>
+          <button class="send-button dialog-submit" type="submit"><span>Join the room</span><span aria-hidden="true">↗</span></button>
+        </form>
+      </dialog>
+    </main>
+  </body>
+</html>
