@@ -3,14 +3,15 @@ kind: Service
 metadata:
   name: frontend
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
     app: small-room
     tier: frontend
   ports:
     - name: http
+      nodePort: 30080
       port: 80
-      targetPort: http
+      targetPort: 80
 ---
 apiVersion: v1
 kind: Service
