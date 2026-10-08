@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: ejeet2026/small-room-frontend:latest
+          image: small-room-frontend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -63,7 +63,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ejeet2026/small-room-backend:latest
+          image: small-room-backend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
