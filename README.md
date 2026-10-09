@@ -1,6 +1,6 @@
 # Small Room
 
-A small realtime chat room split across three containers: Nginx serves the frontend, Node.js and Socket.IO handle chat, and PostgreSQL stores message history.
+A small realtime chat room: Nginx serves the frontend, Node.js and Socket.IO handle chat, and PostgreSQL stores message history. Grafana Alloy collects container logs into Loki, which you can explore in Grafana.
 
 ## Run with Docker Compose
 
@@ -10,9 +10,11 @@ Requires Docker with the Compose plugin.
 docker compose up --build
 ```
 
-Open http://localhost:8080. Compose starts the frontend, backend, and database separately. Chat history persists in the `chat-data` volume.
+Open http://localhost:8080 for the chat room and http://localhost:3001 for Grafana. Sign in to Grafana with `admin` / `admin` by default; set `GRAFANA_ADMIN_PASSWORD` before starting Compose to use a different password. In Grafana, open **Explore**, select the Loki data source, and try `{job="docker"}`. To view backend JSON logs, use `{job="docker", container=~".*backend.*"} | json`; filter for `event="http.request"`, `event="chat.user_connected"`, `event="chat.user_disconnected"`, `event="chat.user_joined"`, or `event="chat.message_sent"` to inspect HTTP requests and chat activity. Nginx access logs are available with `{job="docker", container=~".*frontend.*"}`.
 
-The included database password is for local development only. Change it before deploying this app publicly.
+Chat message bodies are not written to logs. Message events include metadata such as sender and text length only. Grafana persists its data in the `grafana-data` volume, and Loki stores logs in `loki-data`; chat history persists in `chat-data`. Alloy reads container logs via the Docker socket, and Loki is only reachable by other Compose services. These observability services are configured for local Docker Compose, not the Kubernetes manifests.
+
+The included database password and default Grafana password are for local development only. Change them before deploying this app publicly.
 
 The backend health endpoint is available at http://localhost:8080/health.
 
