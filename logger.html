@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DB Storage & Write Observer - Kubernetes Cluster</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            slate: {
+              850: '#111827',
+              900: '#0f172a',
+              950: '#080d1a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #080d1a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+    .pulse-green {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: pulse-green-anim 2s infinite;
+    }
+    @keyframes pulse-green-anim {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+  </style>
+</head>
+<body class="h-full font-sans antialiased bg-slate-950 text-slate-200 flex flex-col overflow-x-hidden selection:bg-emerald-500 selection:text-slate-950">
+
+  <!-- Header & Cluster Context Topbar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        
+        <!-- Brand & Context -->
+        <div class="flex items-center space-x-3">
+          <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shadow-lg shadow-emerald-500/20 ring-1 ring-white/20">
+            <i class="fa-solid me-0 fa-database text-lg text-slate-950"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-lg font-bold text-white tracking-tight">PostgreSQL Write Observer</h1>
+              <span class="px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full font-medium flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-green"></span> Live Pod Output
+              </span>
+            </div>
+            <p class="text-xs text-slate-400">Database PUT / INSERT / UPDATE Storage Operations Tracker</p>
+          </div>
+        </div>
+
+        <!-- K8s Services Status Pill bar -->
+        <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+          <div class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="text-slate-400">backend:</span>
+            <span class="text-slate-200">10.96.108.25:3000</span>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="text-slate-400">database:</span>
+            <span class="text-slate-200">10.96.61.4:5432</span>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2 ring-1 ring-sky-500/30">
+            <span class="w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
+            <span class="text-slate-400">observer:</span>
+            <span class="text-sky-300">NodePort 32000</span>
+          </div>
+        </div>
+
+        <!-- Mode Toggle & Controls -->
+        <div class="flex items-center gap-3">
+          <button id="streamToggleBtn" onclick="toggleStream()" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30 text-xs font-semibold flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-pause text-xs" id="streamToggleIcon"></i>
+            <span id="streamToggleText">Pause Stream</span>
+          </button>
+          <button onclick="clearLogs()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 transition-all">
+            <i class="fa-solid fa-trash-can text-slate-400"></i> Clear
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1 w-full">
+
+    <!-- KPI Metrics Cards -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <!-- Metric 1: Total DB Writes -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 relative overflow-hidden group hover:border-slate-700 transition-all">
+        <div class="absolute -right-2 -bottom-2 opacity-10 group-hover:opacity-20 transition-opacity">
+          <i class="fa-solid fa-database text-6xl text-emerald-400"></i>
+        </div>
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Total DB Writes / PUTs</div>
+        <div class="flex items-baseline justify-between">
+          <div class="text-2xl font-bold font-mono text-white" id="statTotalWrites">1,428</div>
+          <span class="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+            <i class="fa-solid fa-arrow-trend-up mr-1"></i>+12/m
+          </span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex items-center justify-between">
+          <span>Table: <code class="text-slate-300">messages</code></span>
+          <span class="text-emerald-400 font-mono">99.4% Success</span>
+        </div>
+      </div>
+
+      <!-- Metric 2: Average Storage Latency -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 relative overflow-hidden group hover:border-slate-700 transition-all">
+        <div class="absolute -right-2 -bottom-2 opacity-10 group-hover:opacity-20 transition-opacity">
+          <i class="fa-solid fa-bolt text-6xl text-amber-400"></i>
+        </div>
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Avg Storage Latency</div>
+        <div class="flex items-baseline justify-between">
+          <div class="text-2xl font-bold font-mono text-amber-400" id="statAvgLatency">4.2 ms</div>
+          <span class="text-xs font-mono text-slate-400">p95: <span class="text-amber-300">8.7ms</span></span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex items-center justify-between">
+          <span>Pool: <code class="text-slate-300">pg.Pool(5432)</code></span>
+          <span class="text-amber-400 font-mono">Optimal</span>
+        </div>
+      </div>
+
+      <!-- Metric 3: Active DB Connections -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 relative overflow-hidden group hover:border-slate-700 transition-all">
+        <div class="absolute -right-2 -bottom-2 opacity-10 group-hover:opacity-20 transition-opacity">
+          <i class="fa-solid fa-users text-6xl text-sky-400"></i>
+        </div>
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Active Chat Connections</div>
+        <div class="flex items-baseline justify-between">
+          <div class="text-2xl font-bold font-mono text-sky-400" id="statActiveUsers">18</div>
+          <span class="text-xs font-semibold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+            <i class="fa-solid fa-network-wired mr-1"></i>Socket.io
+          </span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex items-center justify-between">
+          <span>Event: <code class="text-slate-300">chat:presence</code></span>
+          <span class="text-sky-300 font-mono" id="statClientsCount">18 Clients</span>
+        </div>
+      </div>
+
+      <!-- Metric 4: Total Storage Volume -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 relative overflow-hidden group hover:border-slate-700 transition-all">
+        <div class="absolute -right-2 -bottom-2 opacity-10 group-hover:opacity-20 transition-opacity">
+          <i class="fa-solid fa-hard-drive text-6xl text-purple-400"></i>
+        </div>
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Total Payload Stored</div>
+        <div class="flex items-baseline justify-between">
+          <div class="text-2xl font-bold font-mono text-purple-300" id="statStorageVolume">2.84 MB</div>
+          <span class="text-xs font-mono text-slate-400">ID Max: <span class="text-purple-300 font-bold" id="statMaxId">#1428</span></span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex items-center justify-between">
+          <span>Engine: <code class="text-slate-300">PostgreSQL 15</code></span>
+          <span class="text-purple-400 font-mono">Healthy</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Analytics Section: Charts -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Write Throughput Live Chart -->
+      <div class="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-sm font-semibold text-white flex items-center gap-2">
+              <i class="fa-solid fa-chart-line text-emerald-400"></i> Database Write Throughput (Ops / Sec)
+            </h2>
+            <p class="text-xs text-slate-400">Real-time PostgreSQL INSERT and UPDATE ops frequency over time</p>
+          </div>
+          <div class="flex items-center gap-3 font-mono text-xs">
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span> INSERTs</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-sky-400"></span> UPDATEs</span>
+          </div>
+        </div>
+
+        <div class="w-full h-44 relative flex items-end">
+          <canvas id="throughputCanvas" class="w-full h-full block"></canvas>
+        </div>
+      </div>
+
+      <!-- Storage Execution Latency Graph -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-sm font-semibold text-white flex items-center gap-2">
+              <i class="fa-solid fa-gauge-high text-amber-400"></i> Query Latency (ms)
+            </h2>
+            <p class="text-xs text-slate-400">Storage execution duration breakdown</p>
+          </div>
+          <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">&lt; 10ms target</span>
+        </div>
+
+        <div class="w-full h-44 relative flex items-end">
+          <canvas id="latencyCanvas" class="w-full h-full block"></canvas>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Operation Stream & Audit Log Table -->
+    <section class="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-xl">
+      
+      <!-- Table Filter Bar -->
+      <div class="p-4 border-b border-slate-800 bg-slate-900 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        
+        <div class="flex flex-1 items-center gap-3">
+          <!-- Search Box -->
+          <div class="relative flex-1 max-w-md">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+            <input type="text" id="searchInput" oninput="applyFilters()" placeholder="Filter by username, text payload, or message ID..." class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono">
+          </div>
+
+          <!-- Operation Filter Dropdown -->
+          <select id="opFilter" onchange="applyFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none focus:border-emerald-500">
+            <option value="ALL">All Operations</option>
+            <option value="INSERT">INSERT (messages)</option>
+            <option value="UPDATE">UPDATE (presence)</option>
+            <option value="HEALTH">SELECT (healthcheck)</option>
+          </select>
+
+          <!-- Status Filter -->
+          <select id="statusFilter" onchange="applyFilters()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none focus:border-emerald-500">
+            <option value="ALL">All Statuses</option>
+            <option value="SUCCESS">Success (200/201)</option>
+            <option value="FAILED">Failed / Error</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2 justify-end text-xs font-mono text-slate-400">
+          <span>Showing <strong id="visibleLogCount" class="text-white">0</strong> operations</span>
+        </div>
+
+      </div>
+
+      <!-- Real-time Logs Table -->
+      <div class="overflow-x-auto max-h-[480px]">
+        <table class="w-full text-left border-collapse">
+          <thead class="bg-slate-950/80 sticky top-0 border-b border-slate-800 text-[11px] font-mono text-slate-400 uppercase tracking-wider z-10 backdrop-blur">
+            <tr>
+              <th class="py-2.5 px-4">Timestamp</th>
+              <th class="py-2.5 px-4">Type</th>
+              <th class="py-2.5 px-4">Target Table</th>
+              <th class="py-2.5 px-4">Record ID / Event</th>
+              <th class="py-2.5 px-4">User</th>
+              <th class="py-2.5 px-4">Storage Payload</th>
+              <th class="py-2.5 px-4 text-right">Latency</th>
+              <th class="py-2.5 px-4 text-center">Status</th>
+              <th class="py-2.5 px-4 text-center">Inspect</th>
+            </tr>
+          </thead>
+          <tbody id="logTableBody" class="divide-y divide-slate-800/60 font-mono text-xs">
+            <!-- Dynamic Log Rows injected here -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty State Indicator -->
+      <div id="emptyState" class="hidden py-12 text-center text-slate-500 text-xs">
+        <i class="fa-solid fa-filter text-2xl mb-2 text-slate-600"></i>
+        <p>No storage write operations match your filter criteria.</p>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- JSON Payload Inspection Drawer / Modal -->
+  <div id="payloadModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-2xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+      
+      <!-- Modal Header -->
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
+        <div class="flex items-center space-x-2">
+          <span id="modalOpBadge" class="px-2 py-0.5 text-xs font-bold font-mono rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            INSERT
+          </span>
+          <h3 class="text-sm font-bold text-white font-mono" id="modalTitle">PostgreSQL Record Inspector</h3>
+        </div>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-white text-lg w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-all">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-5 space-y-4 overflow-y-auto text-xs font-mono">
+        
+        <!-- Metadata Overview -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800">
+          <div>
+            <span class="text-slate-500 block text-[10px] uppercase">Table Name</span>
+            <span class="text-slate-200 font-bold" id="modalTable">messages</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px] uppercase">Record ID</span>
+            <span class="text-emerald-400 font-bold" id="modalRecordId">#1428</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px] uppercase">Execution Latency</span>
+            <span class="text-amber-400 font-bold" id="modalLatency">3.8 ms</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px] uppercase">DB Host</span>
+            <span class="text-slate-300">10.96.61.4:5432</span>
+          </div>
+        </div>
+
+        <!-- Raw SQL Execution Trace -->
+        <div>
+          <label class="text-slate-400 text-[11px] font-semibold block mb-1">Executed SQL Query:</label>
+          <div id="modalSqlQuery" class="p-3 bg-slate-950 border border-slate-800 rounded-lg text-emerald-300 overflow-x-auto whitespace-pre-wrap">
+            INSERT INTO messages (username, text) VALUES ($1, $2) RETURNING id, username, text, created_at AS "createdAt"
+          </div>
+        </div>
+
+        <!-- JSON Payload Viewer -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-slate-400 text-[11px] font-semibold">Database Storage JSON Payload:</label>
+            <button onclick="copyPayload()" class="text-slate-400 hover:text-white text-[11px] flex items-center gap-1">
+              <i class="fa-solid fa-copy"></i> Copy
+            </button>
+          </div>
+          <pre id="modalJsonPayload" class="p-3 bg-slate-950 border border-slate-800 rounded-lg text-slate-300 overflow-x-auto max-h-60 text-[11px] leading-relaxed"></pre>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-3 border-t border-slate-800 bg-slate-950/60 flex justify-end">
+        <button onclick="closeModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-all">
+          Close Window
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // State management
+    let isStreaming = true;
+    let autoIncrementId = 1428;
+    let totalWritesCount = 1428;
+    let totalBytesStored = 2978400; // ~2.84MB
+    let activeUsers = 18;
+    let logsHistory = [];
+    let throughputData = Array(20).fill(0);
+    let latencyData = Array(20).fill(0);
+
+    const USERS = ['admin', 'alex_k8s', 'dev_sarah', 'observer_bot', 'postgres_admin', 'node_worker'];
+    const SAMPLE_MESSAGES = [
+      'Joined chatroom session.',
+      'Deploying backend updates to Kubernetes namespace.',
+      'Checking PostgreSQL database pool latency.',
+      'Storing encrypted message payload.',
+      'Testing NodePort 32000 observer connection.',
+      'Health check OK - status 200.',
+      'Executed schema initialization successfully.',
+      'Broadcasting chat:typing event to active sockets.'
+    ];
+
+    // Initialize initial logs
+    function generateInitialLogs() {
+      const now = Date.now();
+      for (let i = 25; i >= 0; i--) {
+        const time = new Date(now - i * 3500);
+        const isInsert = Math.random() > 0.3;
+        const op = isInsert ? 'INSERT' : (Math.random() > 0.5 ? 'UPDATE' : 'HEALTH');
+        const user = USERS[Math.floor(Math.random() * USERS.length)];
+        const text = SAMPLE_MESSAGES[Math.floor(Math.random() * SAMPLE_MESSAGES.length)];
+        const latency = (Math.random() * 6 + 1.2).toFixed(1);
+        const isError = Math.random() < 0.04;
+
+        logsHistory.push({
+          id: autoIncrementId - i,
+          timestamp: time.toISOString(),
+          timeFormatted: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          op: op,
+          table: op === 'INSERT' ? 'messages' : (op === 'UPDATE' ? 'presence' : 'pg_catalog'),
+          user: user,
+          text: text,
+          latency: latency,
+          status: isError ? 'FAILED' : 'SUCCESS',
+          sql: op === 'INSERT' 
+            ? `INSERT INTO messages (username, text) VALUES ('${user}', '${text}') RETURNING id, username, text, created_at;` 
+            : `UPDATE presence SET last_seen = NOW() WHERE username = '${user}';`,
+          payload: {
+            id: autoIncrementId - i,
+            username: user,
+            text: text,
+            createdAt: time.toISOString(),
+            dbHost: '10.96.61.4:5432',
+            clientIp: `10.244.0.${Math.floor(Math.random()*250)}`
+          }
+        });
+      }
+      renderLogs();
+    }
+
+    // Render logs table
+    function renderLogs() {
+      const tbody = document.getElementById('logTableBody');
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const opVal = document.getElementById('opFilter').value;
+      const statusVal = document.getElementById('statusFilter').value;
+
+      const filtered = logsHistory.filter(log => {
+        const matchSearch = log.user.toLowerCase().includes(search) || 
+                            log.text.toLowerCase().includes(search) || 
+                            log.id.toString().includes(search);
+        const matchOp = opVal === 'ALL' || log.op === opVal;
+        const matchStatus = statusVal === 'ALL' || log.status === statusVal;
+        return matchSearch && matchOp && matchStatus;
+      });
+
+      document.getElementById('visibleLogCount').innerText = filtered.length;
+      document.getElementById('emptyState').classList.toggle('hidden', filtered.length > 0);
+
+      tbody.innerHTML = filtered.map(log => {
+        let opBadge = '';
+        if (log.op === 'INSERT') {
+          opBadge = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">INSERT</span>`;
+        } else if (log.op === 'UPDATE') {
+          opBadge = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-sky-500/10 text-sky-400 border border-sky-500/30">UPDATE</span>`;
+        } else {
+          opBadge = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-800 text-slate-400 border border-slate-700">SELECT</span>`;
+        }
+
+        const statusBadge = log.status === 'SUCCESS' 
+          ? `<span class="inline-flex items-center gap-1 text-emerald-400 text-[11px]"><i class="fa-solid fa-circle-check"></i> OK</span>`
+          : `<span class="inline-flex items-center gap-1 text-rose-400 text-[11px]"><i class="fa-solid fa-circle-xmark"></i> ERR</span>`;
+
+        return `
+          <tr class="hover:bg-slate-800/40 transition-colors group">
+            <td class="py-2.5 px-4 text-slate-400">${log.timeFormatted}</td>
+            <td class="py-2.5 px-4">${opBadge}</td>
+            <td class="py-2.5 px-4 text-slate-300 font-semibold">${log.table}</td>
+            <td class="py-2.5 px-4 text-emerald-400">#${log.id}</td>
+            <td class="py-2.5 px-4 text-slate-200">${log.user}</td>
+            <td class="py-2.5 px-4 text-slate-400 truncate max-w-xs" title="${log.text}">${log.text}</td>
+            <td class="py-2.5 px-4 text-right text-amber-300 font-medium">${log.latency} ms</td>
+            <td class="py-2.5 px-4 text-center">${statusBadge}</td>
+            <td class="py-2.5 px-4 text-center">
+              <button onclick="openModal(${log.id})" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 hover:text-white transition-all">
+                <i class="fa-solid fa-code"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Add a new simulated log
+    function addLogEntry() {
+      if (!isStreaming) return;
+
+      autoIncrementId++;
+      totalWritesCount++;
+      
+      const isInsert = Math.random() > 0.25;
+      const op = isInsert ? 'INSERT' : (Math.random() > 0.4 ? 'UPDATE' : 'HEALTH');
+      const user = USERS[Math.floor(Math.random() * USERS.length)];
+      const text = SAMPLE_MESSAGES[Math.floor(Math.random() * SAMPLE_MESSAGES.length)];
+      const latency = (Math.random() * 5 + 1.1).toFixed(1);
+      const isError = Math.random() < 0.03;
+      const time = new Date();
+
+      totalBytesStored += text.length + 80;
+
+      const newLog = {
+        id: autoIncrementId,
+        timestamp: time.toISOString(),
+        timeFormatted: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        op: op,
+        table: op === 'INSERT' ? 'messages' : (op === 'UPDATE' ? 'presence' : 'pg_catalog'),
+        user: user,
+        text: text,
+        latency: latency,
+        status: isError ? 'FAILED' : 'SUCCESS',
+        sql: op === 'INSERT' 
+          ? `INSERT INTO messages (username, text) VALUES ('${user}', '${text}') RETURNING id, username, text, created_at;` 
+          : `UPDATE presence SET active_connections = ${activeUsers} WHERE username = '${user}';`,
+        payload: {
+          id: autoIncrementId,
+          username: user,
+          text: text,
+          createdAt: time.toISOString(),
+          dbHost: '10.96.61.4:5432',
+          clientIp: `10.244.0.${Math.floor(Math.random()*250)}`
+        }
+      };
+
+      logsHistory.unshift(newLog);
+      if (logsHistory.length > 200) logsHistory.pop();
+
+      // Update KPIs
+      document.getElementById('statTotalWrites').innerText = totalWritesCount.toLocaleString();
+      document.getElementById('statMaxId').innerText = `#${autoIncrementId}`;
+      document.getElementById('statStorageVolume').innerText = (totalBytesStored / (1024 * 1024)).toFixed(2) + ' MB';
+      document.getElementById('statAvgLatency').innerText = `${latency} ms`;
+
+      // Update Chart Arrays
+      throughputData.push(isInsert ? 2 : 1);
+      throughputData.shift();
+
+      latencyData.push(parseFloat(latency));
+      latencyData.shift();
+
+      renderLogs();
+      drawCharts();
+    }
+
+    // Modal Control Functions
+    function openModal(id) {
+      const log = logsHistory.find(l => l.id === id);
+      if (!log) return;
+
+      document.getElementById('modalTitle').innerText = `Inspector: ${log.table} (ID #${log.id})`;
+      document.getElementById('modalTable').innerText = log.table;
+      document.getElementById('modalRecordId').innerText = `#${log.id}`;
+      document.getElementById('modalLatency').innerText = `${log.latency} ms`;
+      document.getElementById('modalSqlQuery').innerText = log.sql;
+      document.getElementById('modalJsonPayload').innerText = JSON.stringify(log.payload, null, 2);
+
+      const modalBadge = document.getElementById('modalOpBadge');
+      modalBadge.innerText = log.op;
+      if (log.op === 'INSERT') {
+        modalBadge.className = 'px-2 py-0.5 text-xs font-bold font-mono rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+      } else {
+        modalBadge.className = 'px-2 py-0.5 text-xs font-bold font-mono rounded bg-sky-500/20 text-sky-400 border border-sky-500/30';
+      }
+
+      document.getElementById('payloadModal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('payloadModal').classList.add('hidden');
+    }
+
+    function copyPayload() {
+      const jsonText = document.getElementById('modalJsonPayload').innerText;
+      navigator.clipboard.writeText(jsonText);
+      alert('JSON Payload copied to clipboard!');
+    }
+
+    function toggleStream() {
+      isStreaming = !isStreaming;
+      const btn = document.getElementById('streamToggleBtn');
+      const icon = document.getElementById('streamToggleIcon');
+      const text = document.getElementById('streamToggleText');
+
+      if (isStreaming) {
+        btn.className = 'px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30 text-xs font-semibold flex items-center gap-2 transition-all';
+        icon.className = 'fa-solid fa-pause text-xs';
+        text.innerText = 'Pause Stream';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-lg bg-amber-600/20 border border-amber-500/40 text-amber-300 hover:bg-amber-600/30 text-xs font-semibold flex items-center gap-2 transition-all';
+        icon.className = 'fa-solid fa-play text-xs';
+        text.innerText = 'Resume Stream';
+      }
+    }
+
+    function clearLogs() {
+      logsHistory = [];
+      renderLogs();
+    }
+
+    function applyFilters() {
+      renderLogs();
+    }
+
+    // Custom Canvas Chart Renderers
+    function drawCharts() {
+      // 1. Throughput Canvas
+      const tCanvas = document.getElementById('throughputCanvas');
+      if (tCanvas) {
+        const ctx = tCanvas.getContext('2d');
+        tCanvas.width = tCanvas.offsetWidth;
+        tCanvas.height = tCanvas.offsetHeight;
+
+        const w = tCanvas.width;
+        const h = tCanvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const step = w / (throughputData.length - 1);
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+
+        throughputData.forEach((val, index) => {
+          const x = index * step;
+          const y = h - (val / 4) * (h - 20) - 10;
+          ctx.lineTo(x, y);
+        });
+
+        ctx.lineTo(w, h);
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, 'rgba(16, 185, 129, 0.35)');
+        grad.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Stroke line
+        ctx.beginPath();
+        throughputData.forEach((val, index) => {
+          const x = index * step;
+          const y = h - (val / 4) * (h - 20) - 10;
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // 2. Latency Bar Canvas
+      const lCanvas = document.getElementById('latencyCanvas');
+      if (lCanvas) {
+        const ctx = lCanvas.getContext('2d');
+        lCanvas.width = lCanvas.offsetWidth;
+        lCanvas.height = lCanvas.offsetHeight;
+
+        const w = lCanvas.width;
+        const h = lCanvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const barWidth = (w / latencyData.length) - 4;
+
+        latencyData.forEach((val, index) => {
+          const x = index * ((w / latencyData.length));
+          const barHeight = (val / 10) * (h - 20);
+          const y = h - barHeight;
+
+          ctx.fillStyle = val > 7 ? '#f59e0b' : '#38bdf8';
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth, barHeight, [3, 3, 0, 0]);
+          ctx.fill();
+        });
+      }
+    }
+
+    // Startup Initializer
+    window.addEventListener('load', () => {
+      generateInitialLogs();
+      drawCharts();
+
+      // Loop simulation
+      setInterval(addLogEntry, 2000);
+
+      window.addEventListener('resize', drawCharts);
+    });
+  </script>
+
+</body>
+</html>

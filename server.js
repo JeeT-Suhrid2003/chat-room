@@ -4,6 +4,15 @@ const { Pool } = require('pg');
 const { Server } = require('socket.io');
 
 const port = Number(process.env.PORT) || 3000;
+const log = (level, event, fields = {}) => {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    event,
+    ...fields,
+  }));
+};
+
 const database = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT) || 5432,
@@ -15,6 +24,19 @@ const database = new Pool({
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+app.use((request, response, next) => {
+  const startedAt = process.hrtime.bigint();
+  response.on('finish', () => {
+    log('info', 'http.request', {
+      method: request.method,
+      path: request.path,
+      statusCode: response.statusCode,
+      durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+    });
+  });
+  next();
+});
 
 const initializeDatabase = () => database.query(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -29,7 +51,8 @@ app.get('/health', async (_request, response) => {
   try {
     await database.query('SELECT 1');
     response.json({ status: 'ok' });
-  } catch {
+  } catch (error) {
+    log('error', 'health.check_failed', { error: error.message });
     response.status(503).json({ status: 'database unavailable' });
   }
 });
@@ -39,13 +62,16 @@ io.on('connection', (socket) => {
     'SELECT id, username, text, created_at AS "createdAt" FROM messages ORDER BY id DESC LIMIT 60'
   ).then(({ rows }) => {
     if (socket.connected) socket.emit('chat:history', rows.reverse());
-  }).catch((error) => console.error('Could not load chat history:', error));
+  }).catch((error) => log('error', 'chat.history_load_failed', { error: error.message }));
 
-  io.emit('chat:presence', io.engine.clientsCount);
+  const activeUsers = io.engine.clientsCount;
+  log('info', 'chat.user_connected', { activeUsers });
+  io.emit('chat:presence', activeUsers);
 
   socket.on('chat:join', (value) => {
     const username = typeof value === 'string' ? value.trim().slice(0, 24) : '';
     socket.data.username = username || 'Guest';
+    log('info', 'chat.user_joined', { username: socket.data.username });
     io.emit('chat:presence', io.engine.clientsCount);
   });
 
@@ -68,23 +94,30 @@ io.on('connection', (socket) => {
         'INSERT INTO messages (username, text) VALUES ($1, $2) RETURNING id, username, text, created_at AS "createdAt"',
         [socket.data.username, text]
       );
+      log('info', 'chat.message_sent', {
+        messageId: rows[0].id,
+        username: socket.data.username,
+        textLength: text.length,
+      });
       io.emit('chat:message', rows[0]);
     } catch (error) {
-      console.error('Could not save chat message:', error);
+      log('error', 'chat.message_save_failed', { error: error.message });
     }
   });
 
   socket.on('disconnect', () => {
     io.emit('chat:typing', { username: socket.data.username, isTyping: false });
-    io.emit('chat:presence', io.engine.clientsCount);
+    const activeUsers = io.engine.clientsCount;
+    log('info', 'chat.user_disconnected', { activeUsers });
+    io.emit('chat:presence', activeUsers);
   });
 });
 
 initializeDatabase().then(() => {
   server.listen(port, '0.0.0.0', () => {
-    console.log(`Small Room backend is listening on port ${port}`);
+    log('info', 'server.listening', { port });
   });
 }).catch((error) => {
-  console.error('Could not connect to the database:', error);
+  log('error', 'database.initialization_failed', { error: error.message });
   process.exit(1);
 });
