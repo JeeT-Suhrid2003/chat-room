@@ -3,13 +3,12 @@ kind: Service
 metadata:
   name: frontend
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: small-room
     tier: frontend
   ports:
     - name: http
-      nodePort: 30080
       port: 80
       targetPort: 80
 ---

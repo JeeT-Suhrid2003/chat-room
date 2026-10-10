@@ -45,7 +45,31 @@ const initializeDatabase = () => database.query(`
     text TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )
-`);
+`).then(() => database.query(`
+  CREATE TABLE IF NOT EXISTS chat_user_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    socket_id TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    disconnected_at TIMESTAMPTZ
+  )
+`)).then(() => database.query(`
+  CREATE INDEX IF NOT EXISTS chat_user_sessions_active_idx
+  ON chat_user_sessions (last_seen_at)
+  WHERE disconnected_at IS NULL
+`));
+
+const persistSessionChange = (socket, event, query, values) => {
+  socket.data.sessionWrite = (socket.data.sessionWrite || Promise.resolve())
+    .then(() => database.query(query, values))
+    .then(({ rowCount }) => {
+      if (rowCount !== 1) {
+        log('error', event, { socketId: socket.id, error: 'Expected one session row to be updated' });
+      }
+    })
+    .catch((error) => log('error', event, { socketId: socket.id, error: error.message }));
+};
 
 app.get('/health', async (_request, response) => {
   try {
@@ -58,6 +82,13 @@ app.get('/health', async (_request, response) => {
 });
 
 io.on('connection', (socket) => {
+  persistSessionChange(
+    socket,
+    'chat.session_create_failed',
+    'INSERT INTO chat_user_sessions (socket_id, username) VALUES ($1, $2)',
+    [socket.id, 'Guest']
+  );
+
   database.query(
     'SELECT id, username, text, created_at AS "createdAt" FROM messages ORDER BY id DESC LIMIT 60'
   ).then(({ rows }) => {
@@ -71,6 +102,12 @@ io.on('connection', (socket) => {
   socket.on('chat:join', (value) => {
     const username = typeof value === 'string' ? value.trim().slice(0, 24) : '';
     socket.data.username = username || 'Guest';
+    persistSessionChange(
+      socket,
+      'chat.session_update_failed',
+      'UPDATE chat_user_sessions SET username = $1, last_seen_at = NOW() WHERE socket_id = $2 AND disconnected_at IS NULL',
+      [socket.data.username, socket.id]
+    );
     log('info', 'chat.user_joined', { username: socket.data.username });
     io.emit('chat:presence', io.engine.clientsCount);
   });
@@ -107,15 +144,42 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     io.emit('chat:typing', { username: socket.data.username, isTyping: false });
+    persistSessionChange(
+      socket,
+      'chat.session_disconnect_failed',
+      'UPDATE chat_user_sessions SET disconnected_at = NOW(), last_seen_at = NOW() WHERE socket_id = $1 AND disconnected_at IS NULL',
+      [socket.id]
+    );
     const activeUsers = io.engine.clientsCount;
     log('info', 'chat.user_disconnected', { activeUsers });
     io.emit('chat:presence', activeUsers);
   });
 });
 
+const refreshActiveSessions = async () => {
+  try {
+    const socketIds = [...io.sockets.sockets.keys()];
+    if (socketIds.length > 0) {
+      await database.query(
+        'UPDATE chat_user_sessions SET last_seen_at = NOW() WHERE socket_id = ANY($1::text[]) AND disconnected_at IS NULL',
+        [socketIds]
+      );
+    }
+    await database.query(`
+      UPDATE chat_user_sessions
+      SET disconnected_at = last_seen_at
+      WHERE disconnected_at IS NULL
+        AND last_seen_at < NOW() - INTERVAL '45 seconds'
+    `);
+  } catch (error) {
+    log('error', 'chat.session_refresh_failed', { error: error.message });
+  }
+};
+
 initializeDatabase().then(() => {
   server.listen(port, '0.0.0.0', () => {
     log('info', 'server.listening', { port });
+    setInterval(refreshActiveSessions, 15000);
   });
 }).catch((error) => {
   log('error', 'database.initialization_failed', { error: error.message });

@@ -2,6 +2,8 @@
 
 A small realtime chat room: Nginx serves the frontend, Node.js and Socket.IO handle chat, and PostgreSQL stores message history. Grafana Alloy collects container logs into Loki, which you can explore in Grafana.
 
+Each chat connection is recorded in the PostgreSQL `chat_user_sessions` table, including its username, connection time, last activity, and disconnection time. To list active users, query sessions with `disconnected_at IS NULL` and a `last_seen_at` within the last 45 seconds. The backend refreshes active sessions every 15 seconds and marks sessions disconnected after they stop refreshing, so sessions left behind by a crashed pod are eventually closed. Multiple connections using the same display name appear as separate sessions.
+
 ## Run with Docker Compose
 
 Requires Docker with the Compose plugin.
@@ -32,3 +34,30 @@ kubectl apply -f k8s/secret.yml -f k8s/pcv.yml -f k8s/deployment.yml -f k8s/serv
 For another cluster, push the images to a registry and update the image names in `k8s/deployment.yml`. The frontend is exposed by a `NodePort` service on port `30080`; alternatively, use `kubectl port-forward service/frontend 8080:80` and open http://localhost:8080. The database uses a 1 GiB persistent volume claim defined in `k8s/pcv.yml`, so the cluster needs a default StorageClass or a matching PersistentVolume.
 
 The manifest's database password is for local development only. Replace it before deploying publicly.
+
+For an existing Kind deployment, rebuild and load the updated backend image, then restart the backend so the session table is created:
+
+```sh
+docker build -t small-room-backend:latest .
+kind load docker-image small-room-backend:latest
+kubectl rollout restart deployment/backend
+kubectl rollout status deployment/backend
+```
+
+To inspect active sessions in Kubernetes, run:
+
+```sh
+kubectl exec -it deployment/database -- psql -U chatroom -d chatroom
+```
+
+Then query current users:
+
+```sql
+SELECT username, connected_at, last_seen_at
+FROM chat_user_sessions
+WHERE disconnected_at IS NULL
+  AND last_seen_at >= NOW() - INTERVAL '45 seconds'
+ORDER BY connected_at;
+```
+
+To view connection history, query `username`, `connected_at`, and `disconnected_at` from `chat_user_sessions`.
