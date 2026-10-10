@@ -20,6 +20,16 @@ The included database password and default Grafana password are for local develo
 
 The backend health endpoint is available at http://localhost:8080/health.
 
+## Run a stress test
+
+Install [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/), make sure the application is reachable at the URL configured in `stress-test.js`, then run:
+
+```sh
+k6 run stress-test.js
+```
+
+The script ramps up to 50 virtual users, then to 100, and takes about 16 minutes. It requires HTTP requests to succeed at least 99% of the time and the 95th-percentile request duration to stay below 500 ms. For the recorded run and its results, see [stress-test-results.md](./stress-test-results.md).
+
 ## Deploy to Kubernetes
 
 Build the two app images and make them available to your cluster. For a local Kind cluster, load the images after building:
@@ -28,10 +38,12 @@ Build the two app images and make them available to your cluster. For a local Ki
 docker build -t small-room-backend:latest .
 docker build -f frontend/Dockerfile -t small-room-frontend:latest .
 kind load docker-image small-room-backend:latest small-room-frontend:latest
-kubectl apply -f k8s/secret.yml -f k8s/pcv.yml -f k8s/deployment.yml -f k8s/service.yaml
+kubectl apply -f k8s/secret.yml -f k8s/pcv.yml -f k8s/deployment.yml -f k8s/service.yaml -f k8s/ingress.yml
 ```
 
-For another cluster, push the images to a registry and update the image names in `k8s/deployment.yml`. The frontend is exposed by a `NodePort` service on port `30080`; alternatively, use `kubectl port-forward service/frontend 8080:80` and open http://localhost:8080. The database uses a 1 GiB persistent volume claim defined in `k8s/pcv.yml`, so the cluster needs a default StorageClass or a matching PersistentVolume.
+For another cluster, push the images to a registry and update the image names in `k8s/deployment.yml`. The database uses a 1 GiB persistent volume claim defined in `k8s/pcv.yml`, so the cluster needs a default StorageClass or a matching PersistentVolume.
+
+The frontend Service is `ClusterIP`. To use `frontend.small-room.local` from `stress-test.js`, the cluster needs an Ingress controller that handles the `nginx` IngressClass, and the hostname must resolve to that controller. Without an Ingress controller, use `kubectl port-forward service/frontend 8080:80` and set the URL in `stress-test.js` to `http://localhost:8080/` before running the test.
 
 The manifest's database password is for local development only. Replace it before deploying publicly.
 
