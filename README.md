@@ -72,4 +72,4 @@ WHERE disconnected_at IS NULL
 ORDER BY connected_at;
 ```
 
-To view connection history, query `username`, `connected_at`, and `disconnected_at` from `chat_user_sessions`.
+To view connection history, query `username`, `connected_at`, and `disconnected_at` from `chat_user_sessions`. o_o
